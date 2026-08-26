@@ -1037,3 +1037,68 @@ int mmc_init(struct msdc_host *host) {
 
     return 0;
 }
+
+#ifdef LIBREECHO_READONLY_DIAGNOSTIC
+int mmc_init_diagnostic(struct msdc_host *host, struct mmc_init_report *report)
+{
+    uint32_t cid[4] = { 0 };
+    uint32_t selected_ocr;
+
+    memset(report, 0, sizeof(*report));
+    host->blksz = 0x200;
+
+    sdr_set_bits(MSDC_CFG, MSDC_CFG_PIO);
+    sleepy();
+    sdr_write32(MSDC_CFG, sdr_read32(MSDC_CFG) | 0x1000);
+    sleepy();
+    report->msdc_cfg = sdr_read32(MSDC_CFG);
+
+    report->go_idle = mmc_go_idle(host);
+    if (report->go_idle) {
+        report->first_failed_stage = MMC_INIT_STAGE_GO_IDLE;
+        return report->go_idle;
+    }
+
+    report->send_op_cond_probe = mmc_send_op_cond(host, 0, &report->ocr);
+    if (report->send_op_cond_probe) {
+        report->first_failed_stage = MMC_INIT_STAGE_SEND_OP_COND_PROBE;
+        return report->send_op_cond_probe;
+    }
+
+    selected_ocr = mmc_select_voltage(host, report->ocr);
+    if (!selected_ocr) {
+        report->select_voltage = -EINVAL;
+        report->first_failed_stage = MMC_INIT_STAGE_SELECT_VOLTAGE;
+        return report->select_voltage;
+    }
+    report->select_voltage = 0;
+    selected_ocr |= 1 << 30;
+
+    report->send_op_cond_ready = mmc_send_op_cond(host, selected_ocr, &report->rocr);
+    if (report->send_op_cond_ready) {
+        report->first_failed_stage = MMC_INIT_STAGE_SEND_OP_COND_READY;
+        return report->send_op_cond_ready;
+    }
+
+    report->all_send_cid = mmc_all_send_cid(host, cid);
+    if (report->all_send_cid) {
+        report->first_failed_stage = MMC_INIT_STAGE_ALL_SEND_CID;
+        return report->all_send_cid;
+    }
+
+    report->set_relative_addr = mmc_set_relative_addr(host, 1);
+    if (report->set_relative_addr) {
+        report->first_failed_stage = MMC_INIT_STAGE_SET_RELATIVE_ADDR;
+        return report->set_relative_addr;
+    }
+
+    report->select_card = mmc_select_card(host, 1);
+    if (report->select_card) {
+        report->first_failed_stage = MMC_INIT_STAGE_SELECT_CARD;
+        return report->select_card;
+    }
+
+    report->first_failed_stage = MMC_INIT_STAGE_NONE;
+    return 0;
+}
+#endif

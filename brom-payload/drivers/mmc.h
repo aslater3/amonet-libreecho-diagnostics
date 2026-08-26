@@ -489,7 +489,33 @@ struct mmc_core_rpmb_req {
     bool ready;
 };
 
+enum mmc_init_stage {
+    MMC_INIT_STAGE_NONE = 0,
+    MMC_INIT_STAGE_GO_IDLE = 1,
+    MMC_INIT_STAGE_SEND_OP_COND_PROBE = 2,
+    MMC_INIT_STAGE_SELECT_VOLTAGE = 3,
+    MMC_INIT_STAGE_SEND_OP_COND_READY = 4,
+    MMC_INIT_STAGE_ALL_SEND_CID = 5,
+    MMC_INIT_STAGE_SET_RELATIVE_ADDR = 6,
+    MMC_INIT_STAGE_SELECT_CARD = 7,
+};
+
+struct mmc_init_report {
+    uint32_t msdc_cfg;
+    int32_t go_idle;
+    int32_t send_op_cond_probe;
+    uint32_t ocr;
+    int32_t select_voltage;
+    int32_t send_op_cond_ready;
+    uint32_t rocr;
+    int32_t all_send_cid;
+    int32_t set_relative_addr;
+    int32_t select_card;
+    uint32_t first_failed_stage;
+};
+
 int mmc_init(struct msdc_host *host);
+int mmc_init_diagnostic(struct msdc_host *host, struct mmc_init_report *report);
 int mmc_read(struct msdc_host *host, uint32_t blk, void *buf);
 int mmc_write(struct msdc_host *host, uint32_t blk, void *buf);
 int mmc_set_part(struct msdc_host *host, int part);
