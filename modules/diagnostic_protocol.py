@@ -4,7 +4,7 @@ from __future__ import annotations
 import dataclasses
 import struct
 import time
-from typing import Any, Callable
+from typing import Any
 
 DIAG_PROTOCOL_VERSION = 1
 DIAG_READY_MAGIC = 0x4C454431
@@ -13,14 +13,6 @@ DIAG_RESPONSE_MAGIC = 0x4C455250
 DIAG_CMD_HELLO = 0x9000
 DIAG_CMD_READ_DEFAULT_SECTOR0 = 0x9001
 DIAG_PARTITION_UNKNOWN = 0xFFFFFFFF
-
-PROTOCOL_VERSION = DIAG_PROTOCOL_VERSION
-READY_MAGIC = DIAG_READY_MAGIC
-REQUEST_MAGIC = DIAG_REQUEST_MAGIC
-RESPONSE_MAGIC = DIAG_RESPONSE_MAGIC
-CMD_HELLO = DIAG_CMD_HELLO
-CMD_READ_DEFAULT_SECTOR0 = DIAG_CMD_READ_DEFAULT_SECTOR0
-PARTITION_UNKNOWN = DIAG_PARTITION_UNKNOWN
 
 _RESPONSE_WORDS = 8
 _RESPONSE_BYTES = _RESPONSE_WORDS * 4
@@ -65,29 +57,23 @@ def encode_request(sequence: int, command: int, argument: int = 0) -> bytes:
         raise ProtocolError("sequence must be between 1 and 0xffffffff")
     return struct.pack(
         ">IIIII",
-        REQUEST_MAGIC,
-        PROTOCOL_VERSION,
+        DIAG_REQUEST_MAGIC,
+        DIAG_PROTOCOL_VERSION,
         sequence,
         command & 0xFFFFFFFF,
         argument & 0xFFFFFFFF,
     )
 
 
-def read_exact(
-    stream: Any,
-    size: int,
-    timeout: float,
-    *,
-    clock: Callable[[], float] = time.monotonic,
-) -> bytes:
+def read_exact(stream: Any, size: int, timeout: float) -> bytes:
     if size < 0 or timeout <= 0:
         raise ProtocolError("invalid exact-read request")
-    deadline = clock() + timeout
+    deadline = time.monotonic() + timeout
     result = bytearray()
     original_timeout = getattr(stream, "timeout", None)
     try:
         while len(result) < size:
-            remaining = deadline - clock()
+            remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             if hasattr(stream, "timeout"):
@@ -98,7 +84,7 @@ def read_exact(
     finally:
         if hasattr(stream, "timeout"):
             stream.timeout = original_timeout
-    timed_out = clock() > deadline
+    timed_out = time.monotonic() > deadline
     if len(result) != size or timed_out:
         raise ProtocolError(f"short response: expected {size} bytes, received {len(result)}")
     return bytes(result)
@@ -116,9 +102,9 @@ def read_response(
     magic, version, sequence, command, selected, target, status_word, payload_len = struct.unpack(
         ">IIIIIIII", header
     )
-    if magic != RESPONSE_MAGIC:
+    if magic != DIAG_RESPONSE_MAGIC:
         raise ProtocolError(f"response magic mismatch: {magic:#x}")
-    if version != PROTOCOL_VERSION:
+    if version != DIAG_PROTOCOL_VERSION:
         raise ProtocolError(f"protocol version mismatch: {version}")
     if sequence != expected_sequence:
         raise ProtocolError(f"response sequence mismatch: expected {expected_sequence}, got {sequence}")
@@ -177,7 +163,7 @@ class DiagnosticProtocol:
         return response
 
     def hello(self, *, timeout: float = 5.0) -> Response:
-        return self.exchange(CMD_HELLO, timeout=timeout)
+        return self.exchange(DIAG_CMD_HELLO, timeout=timeout)
 
     def read_default_sector0(self, *, timeout: float = 5.0) -> Response:
-        return self.exchange(CMD_READ_DEFAULT_SECTOR0, 0, timeout=timeout)
+        return self.exchange(DIAG_CMD_READ_DEFAULT_SECTOR0, 0, timeout=timeout)

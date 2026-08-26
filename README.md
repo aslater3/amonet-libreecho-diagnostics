@@ -19,7 +19,7 @@ python3 -m pip install --require-hashes -r requirements-host.txt
 make -C brom-payload clean
 make -C brom-payload diagnostic
 sha256sum brom-payload/build/diagnostic.bin
-# expected: 5cc4d47ed3c9d83ad72a2db5a4f216d76f652dcebea91e9aa2a76c69b78c700e
+# expected: 5da666f7290b5762fa88f2b248472551323aa0c7dd1e03de41034a46e137915d
 ```
 
 Run only after reviewing the source and explicitly opting into Phase-1 hardware

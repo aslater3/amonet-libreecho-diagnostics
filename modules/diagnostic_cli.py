@@ -15,7 +15,7 @@ from serial.tools import list_ports
 
 from common import Device
 from diagnostic_protocol import (
-    READY_MAGIC,
+    DIAG_READY_MAGIC,
     DiagnosticProtocol,
     ProtocolError,
     decode_init_report,
@@ -24,8 +24,8 @@ from load_payload import load_payload
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PAYLOAD = ROOT / "brom-payload" / "build" / "diagnostic.bin"
-EXPECTED_DIAGNOSTIC_SIZE = 9940
-EXPECTED_DIAGNOSTIC_SHA256 = "5cc4d47ed3c9d83ad72a2db5a4f216d76f652dcebea91e9aa2a76c69b78c700e"
+EXPECTED_DIAGNOSTIC_SIZE = 9988
+EXPECTED_DIAGNOSTIC_SHA256 = "5da666f7290b5762fa88f2b248472551323aa0c7dd1e03de41034a46e137915d"
 
 _INIT_STAGE_NAMES = {
     0: "NONE",
@@ -65,20 +65,29 @@ def _validate_brom_port(
         )
 
 
-def _validate_payload(path: Path) -> None:
-    if not path.is_file() or path.is_symlink():
-        raise RuntimeError(f"missing or unsafe diagnostic payload: {path}")
-    data = path.read_bytes()
-    digest = hashlib.sha256(data).hexdigest()
-    if len(data) != EXPECTED_DIAGNOSTIC_SIZE or digest != EXPECTED_DIAGNOSTIC_SHA256:
-        raise RuntimeError(
-            "diagnostic payload digest mismatch: expected {} bytes / {}, got {} bytes / {}".format(
-                EXPECTED_DIAGNOSTIC_SIZE,
-                EXPECTED_DIAGNOSTIC_SHA256,
-                len(data),
-                digest,
+def _validate_payload(path: Path) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise RuntimeError(f"missing or unsafe diagnostic payload: {path}") from error
+    try:
+        size = os.fstat(descriptor).st_size
+        if size != EXPECTED_DIAGNOSTIC_SIZE:
+            raise RuntimeError(
+                f"diagnostic payload size mismatch: expected {EXPECTED_DIAGNOSTIC_SIZE}, got {size}"
             )
+        data = os.read(descriptor, EXPECTED_DIAGNOSTIC_SIZE + 1)
+        if len(data) != EXPECTED_DIAGNOSTIC_SIZE:
+            raise RuntimeError("diagnostic payload changed while reading")
+    finally:
+        os.close(descriptor)
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != EXPECTED_DIAGNOSTIC_SHA256:
+        raise RuntimeError(
+            f"diagnostic payload digest mismatch: expected {EXPECTED_DIAGNOSTIC_SHA256}, got {digest}"
         )
+    return data
 
 
 def _write_private_result(path: Path, rendered: str) -> None:
@@ -184,7 +193,7 @@ def main() -> int:
     if not args.execute_phase1_hardware:
         parser.error("hardware access requires --execute-phase1-hardware")
     try:
-        _validate_payload(args.payload)
+        payload = _validate_payload(args.payload)
         _validate_brom_port(args.port)
     except RuntimeError as error:
         parser.error(str(error))
@@ -199,8 +208,8 @@ def main() -> int:
     device.handshake(max_attempts=max(1, int(args.timeout)))
     load_payload(
         device,
-        str(args.payload),
-        expected_marker=struct.pack(">I", READY_MAGIC),
+        payload,
+        expected_marker=struct.pack(">I", DIAG_READY_MAGIC),
         wait_for_user=False,
     )
 

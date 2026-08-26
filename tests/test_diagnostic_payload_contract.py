@@ -80,6 +80,8 @@ class DiagnosticPayloadContractTests(unittest.TestCase):
         ):
             self.assertIn(field, header)
             self.assertIn(field, source)
+        self.assertIn("R1_STATUS(cmd->resp[0])", source)
+        self.assertGreaterEqual(source.count("mmc_r1_error(&cmd)"), 3)
         self.assertNotIn("cid[0]", PAYLOAD.read_text(encoding="utf-8"))
 
     def test_diagnostic_build_bounds_command_busy_response_and_pio_polling(self) -> None:

@@ -19,16 +19,6 @@ void _putchar(char character)
     (void)character;
 }
 
-void hex_dump(const void* data, size_t size)
-{
-    size_t i;
-    for (i = 0; i < size; ++i) {
-        printf("%02X ", ((unsigned char*)data)[i]);
-        if ((i + 1) % 16 == 0 || i + 1 == size)
-            printf("\n");
-    }
-}
-
 static void send_word(uint32_t value)
 {
     send_dword_fn(value);
@@ -80,7 +70,6 @@ int main(void)
     uint32_t selected_part = DIAG_PARTITION_UNKNOWN;
     uint32_t state = 0;
     int32_t init_status = -EINVAL;
-    int init_attempted = 0;
 
     /* Restore the BROM USB send pointer overwritten by payload loading. */
     uint32_t *ptr_send = (void*)0x1028A8;
@@ -116,10 +105,7 @@ int main(void)
                 state = 3;
                 break;
             }
-            if (!init_attempted) {
-                init_status = mmc_init_diagnostic(&host, &init_report);
-                init_attempted = 1;
-            }
+            init_status = mmc_init_diagnostic(&host, &init_report);
             send_init_report(sequence, selected_part, init_status, &init_report);
             state = init_status == 0 ? 1 : 3;
             break;

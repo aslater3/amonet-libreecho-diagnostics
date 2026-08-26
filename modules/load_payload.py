@@ -6,6 +6,8 @@ from common import CRYPTO_BASE
 
 from logger import log
 
+MAX_PAYLOAD_SIZE = 0x10000
+
 
 def init(dev):
     dev.write32(CRYPTO_BASE + 0x0C0C, 0)
@@ -116,9 +118,16 @@ def load_payload(dev, path, expected_marker=b"\xB1\xB2\xB3\xB4", wait_for_user=T
     log("Disable bootrom range checks")
     aes_write16(dev, 0x102868, bytes.fromhex("00000000000000000000000080000000"))
 
-    with open(path, "rb") as fin:
-        payload = fin.read()
-    log("Load payload from {} = 0x{:X} bytes".format(path, len(payload)))
+    if isinstance(path, (bytes, bytearray)):
+        payload = bytes(path)
+        source = "validated memory buffer"
+    else:
+        source = str(path)
+        with open(path, "rb") as fin:
+            payload = fin.read(MAX_PAYLOAD_SIZE + 1)
+    if not payload or len(payload) > MAX_PAYLOAD_SIZE:
+        raise RuntimeError("payload must be between 1 and 65536 bytes")
+    log("Load payload from {} = 0x{:X} bytes".format(source, len(payload)))
     while len(payload) % 4 != 0:
         payload += b"\x00"
 

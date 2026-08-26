@@ -6,6 +6,7 @@ import pathlib
 import struct
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -18,14 +19,7 @@ from diagnostic_cli import (  # noqa: E402
     _write_private_result,
     run_readonly_probe,
 )
-from diagnostic_protocol import PARTITION_UNKNOWN, Response  # noqa: E402
-
-
-class PortInfo:
-    def __init__(self, device: str, vid: int | None, pid: int | None):
-        self.device = device
-        self.vid = vid
-        self.pid = pid
+from diagnostic_protocol import DIAG_PARTITION_UNKNOWN, Response  # noqa: E402
 
 
 class FakeProtocol:
@@ -51,7 +45,7 @@ class FakeProtocol:
             self.init_status & 0xFFFFFFFF, 0, 0, 0, 0,
             first_failed_stage,
         )
-        return Response(1, 0x9000, PARTITION_UNKNOWN, 0, self.init_status, report)
+        return Response(1, 0x9000, DIAG_PARTITION_UNKNOWN, 0, self.init_status, report)
 
     def read_default_sector0(self, timeout: float = 5.0) -> Response:
         self.calls.append("read_default_sector0")
@@ -61,7 +55,7 @@ class FakeProtocol:
         return Response(
             1,
             0x9001,
-            PARTITION_UNKNOWN,
+            DIAG_PARTITION_UNKNOWN,
             0,
             self.read_status,
             payload if self.read_status == 0 else b"",
@@ -126,25 +120,25 @@ class DiagnosticCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             payload = pathlib.Path(temporary) / "diagnostic.bin"
             payload.write_bytes(b"not the reviewed payload")
-            with self.assertRaisesRegex(RuntimeError, "digest mismatch"):
+            with self.assertRaisesRegex(RuntimeError, "mismatch"):
                 _validate_payload(payload)
 
     def test_brom_port_requires_exact_mediatek_vid_pid(self) -> None:
-        ports = [PortInfo("/dev/ttyACM0", 0x0E8D, 0x0003)]
+        ports = [SimpleNamespace(device="/dev/ttyACM0", vid=0x0E8D, pid=0x0003)]
         _validate_brom_port("/dev/ttyACM0", lambda: ports)
 
     def test_wrong_or_ambiguous_brom_port_is_rejected(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "not MediaTek BROM"):
             _validate_brom_port(
                 "/dev/ttyACM0",
-                lambda: [PortInfo("/dev/ttyACM0", 0x1234, 0x5678)],
+                lambda: [SimpleNamespace(device="/dev/ttyACM0", vid=0x1234, pid=0x5678)],
             )
         with self.assertRaisesRegex(RuntimeError, "exactly one"):
             _validate_brom_port(
                 "/dev/ttyACM0",
                 lambda: [
-                    PortInfo("/dev/ttyACM0", 0x0E8D, 0x0003),
-                    PortInfo("/dev/ttyACM1", 0x0E8D, 0x0003),
+                    SimpleNamespace(device="/dev/ttyACM0", vid=0x0E8D, pid=0x0003),
+                    SimpleNamespace(device="/dev/ttyACM1", vid=0x0E8D, pid=0x0003),
                 ],
             )
 
