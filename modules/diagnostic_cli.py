@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import stat
 import struct
 import sys
 from pathlib import Path
@@ -66,13 +67,16 @@ def _validate_brom_port(
 
 
 def _validate_payload(path: Path) -> bytes:
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
     except OSError as error:
         raise RuntimeError(f"missing or unsafe diagnostic payload: {path}") from error
     try:
-        size = os.fstat(descriptor).st_size
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise RuntimeError("diagnostic payload must be a regular file")
+        size = metadata.st_size
         if size != EXPECTED_DIAGNOSTIC_SIZE:
             raise RuntimeError(
                 f"diagnostic payload size mismatch: expected {EXPECTED_DIAGNOSTIC_SIZE}, got {size}"

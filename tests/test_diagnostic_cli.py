@@ -2,8 +2,10 @@
 """Behavior tests for the bounded Phase-1 USB read probe."""
 from __future__ import annotations
 
+import os
 import pathlib
 import struct
+import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -122,6 +124,25 @@ class DiagnosticCliTests(unittest.TestCase):
             payload.write_bytes(b"not the reviewed payload")
             with self.assertRaisesRegex(RuntimeError, "mismatch"):
                 _validate_payload(payload)
+
+    def test_fifo_payload_is_rejected_without_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            payload = pathlib.Path(temporary) / "diagnostic.fifo"
+            os.mkfifo(payload)
+            script = (
+                "import pathlib,sys; sys.path.insert(0, 'modules'); "
+                "from diagnostic_cli import _validate_payload; "
+                "_validate_payload(pathlib.Path(sys.argv[1]))"
+            )
+            completed = subprocess.run(
+                [sys.executable, "-c", script, str(payload)],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=1.0,
+            )
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("regular file", completed.stderr)
 
     def test_brom_port_requires_exact_mediatek_vid_pid(self) -> None:
         ports = [SimpleNamespace(device="/dev/ttyACM0", vid=0x0E8D, pid=0x0003)]
