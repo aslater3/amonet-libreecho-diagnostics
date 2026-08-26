@@ -1,0 +1,60 @@
+name: LibreEcho read-only diagnostic CI
+
+on:
+  push:
+    branches:
+      - feature/libreecho-usb-readonly-diagnostics
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install host and ARM build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements-host.txt
+
+      - name: Run host and source-contract tests
+        run: PYTHONDONTWRITEBYTECODE=1 python -B -m unittest discover -s tests -v
+
+      - name: Compile Python sources
+        run: |
+          python -B -m py_compile \
+            modules/common.py \
+            modules/load_payload.py \
+            modules/diagnostic_protocol.py \
+            modules/diagnostic_cli.py
+
+      - name: Build historical and diagnostic payloads
+        run: |
+          make -C brom-payload clean
+          make -C brom-payload -j2 all diagnostic
+          sha256sum brom-payload/build/payload.bin brom-payload/build/diagnostic.bin
+          test "$(sha256sum brom-payload/build/payload.bin | cut -d' ' -f1)" = \
+            16ff2539761a85fe6eea0dcb461b3904bfd0f01c431b49010ebeb5fc2407e5e5
+          test "$(sha256sum brom-payload/build/diagnostic.bin | cut -d' ' -f1)" = \
+            5da666f7290b5762fa88f2b248472551323aa0c7dd1e03de41034a46e137915d
+
+      - name: Verify diagnostic ELF has no persistent storage routines
+        run: |
+          if arm-none-eabi-nm brom-payload/build/diagnostic.elf | \
+             grep -E ' (mmc_write|mmc_set_part|mmc_switch|__mmc_switch|mmc_rpmb_(read|write)|mmc_erase|derive_rpmb_key)$'; then
+            echo "ERROR: persistent storage routine linked into diagnostic ELF" >&2
+            exit 1
+          fi
+
+      - name: Check patch whitespace
+        run: git diff --check

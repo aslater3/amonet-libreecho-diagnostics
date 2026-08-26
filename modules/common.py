@@ -94,12 +94,16 @@ class Device:
         self.dev.write(out_str)
         return self.dev.read()
 
-    def handshake(self):
+    def handshake(self, max_attempts=None):
         # look for start byte
+        attempts = 0
         while True:
             c = self._writeb(b'\xa0')
+            attempts += 1
             if c == b'\x5f':
                 break
+            if max_attempts is not None and attempts >= max_attempts:
+                raise RuntimeError("BROM handshake timed out")
             self.dev.flushInput()
 
         # complete sequence
@@ -175,10 +179,20 @@ class Device:
         self.dev.read(1)
         self.dev.read(2)
 
-    def wait_payload(self):
-        data = self.dev.read(4)
-        if data != b"\xB1\xB2\xB3\xB4":
-            raise RuntimeError("received {} instead of expected pattern".format(data))
+    def wait_payload(self, expected=b"\xB1\xB2\xB3\xB4"):
+        if self.dev is None:
+            raise RuntimeError("device transport is not open")
+        if not isinstance(expected, bytes) or len(expected) != 4:
+            raise RuntimeError("payload pattern must be exactly four bytes")
+        data = bytearray()
+        while len(data) < len(expected):
+            chunk = self.dev.read(len(expected) - len(data))
+            if not chunk:
+                break
+            data.extend(chunk)
+        received = bytes(data)
+        if received != expected:
+            raise RuntimeError("received {} instead of expected pattern {}".format(received, expected))
 
     def emmc_read(self, idx):
         # magic

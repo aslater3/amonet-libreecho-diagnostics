@@ -6,6 +6,8 @@ from common import CRYPTO_BASE
 
 from logger import log
 
+MAX_PAYLOAD_SIZE = 0x10000
+
 
 def init(dev):
     dev.write32(CRYPTO_BASE + 0x0C0C, 0)
@@ -26,22 +28,26 @@ def hw_acquire(dev):
     dev.write32(CRYPTO_BASE, [0x1F, 0x12000])
 
 
-def call_func(dev, func):
+def call_func(dev, func, timeout=10.0):
+    deadline = time.monotonic() + timeout
     dev.write32(CRYPTO_BASE + 0x0804, 3)
     dev.write32(CRYPTO_BASE + 0x0808, 3)
     dev.write32(CRYPTO_BASE + 0x0C00, func)
     dev.write32(CRYPTO_BASE + 0x0400, 0)
     while (not dev.read32(CRYPTO_BASE + 0x0800)):
-        pass
+        if time.monotonic() >= deadline:
+            raise RuntimeError("crypto command timeout")
     if (dev.read32(CRYPTO_BASE + 0x0800) & 2):
         if ( not (dev.read32(CRYPTO_BASE + 0x0800) & 1) ):
           while ( not dev.read32(CRYPTO_BASE + 0x0800) ):
-            pass
+            if time.monotonic() >= deadline:
+                raise RuntimeError("crypto error-status timeout")
         result = -1;
         dev.write32(CRYPTO_BASE + 0x0804, 3)
     else:
         while ( not (dev.read32(CRYPTO_BASE + 0x0418) & 1) ):
-            pass
+            if time.monotonic() >= deadline:
+                raise RuntimeError("crypto completion timeout")
         result = 0;
         dev.write32(CRYPTO_BASE + 0x0804, 3)
     return result
@@ -92,12 +98,13 @@ class UserInputThread(threading.Thread):
         self.done = True
 
 
-def load_payload(dev, path):
-    thread = UserInputThread()
-    thread.start()
-    while not thread.done:
-        dev.write32(0x10007008, 0x1971) # low-level watchdog kick
-        time.sleep(1)
+def load_payload(dev, path, expected_marker=b"\xB1\xB2\xB3\xB4", wait_for_user=True):
+    if wait_for_user:
+        thread = UserInputThread()
+        thread.start()
+        while not thread.done:
+            dev.write32(0x10007008, 0x1971) # low-level watchdog kick
+            time.sleep(1)
 
     log("Init crypto engine")
     init(dev)
@@ -111,9 +118,16 @@ def load_payload(dev, path):
     log("Disable bootrom range checks")
     aes_write16(dev, 0x102868, bytes.fromhex("00000000000000000000000080000000"))
 
-    with open(path, "rb") as fin:
-        payload = fin.read()
-    log("Load payload from {} = 0x{:X} bytes".format(path, len(payload)))
+    if isinstance(path, (bytes, bytearray)):
+        payload = bytes(path)
+        source = "validated memory buffer"
+    else:
+        source = str(path)
+        with open(path, "rb") as fin:
+            payload = fin.read(MAX_PAYLOAD_SIZE + 1)
+    if not payload or len(payload) > MAX_PAYLOAD_SIZE:
+        raise RuntimeError("payload must be between 1 and 65536 bytes")
+    log("Load payload from {} = 0x{:X} bytes".format(source, len(payload)))
     while len(payload) % 4 != 0:
         payload += b"\x00"
 
@@ -130,8 +144,8 @@ def load_payload(dev, path):
     dev.write32(0x1028A8, 0x201000, status_check=False)
 
     log("Wait for the payload to come online...")
-    dev.wait_payload()
-    log("all good")
+    dev.wait_payload(expected=expected_marker)
+    log("payload command transport ready")
 
 
 if __name__ == "__main__":

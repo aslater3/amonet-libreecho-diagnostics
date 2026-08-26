@@ -8,6 +8,10 @@
 #include "sd.h"
 #include "sdio.h"
 #include "errno.h"
+#ifdef LIBREECHO_READONLY_DIAGNOSTIC
+#include "timer.h"
+#define DIAG_POLL_TIMEOUT_MS 2000U
+#endif
 
 #define msdc_txfifocnt()   ((sdr_read32(MSDC_FIFOCS) & MSDC_FIFOCS_TXCNT) >> 16)
 #define msdc_rxfifocnt()   ((sdr_read32(MSDC_FIFOCS) & MSDC_FIFOCS_RXCNT) >> 0)
@@ -100,10 +104,20 @@ int msdc_pio_read(struct msdc_host *host, void *buf)
     u32  ints = 0;
     bool get_xfer_done = 0;
     uint32_t error = 0;
+#ifdef LIBREECHO_READONLY_DIAGNOSTIC
+    uint32_t poll_start = gpt4_get_current_tick();
+#endif
     // unsigned long tmo = jiffies + DAT_TIMEOUT;  
           
     sdr_clr_bits(MSDC_INTEN, wints);
     while (1) {
+#ifdef LIBREECHO_READONLY_DIAGNOSTIC
+        if (gpt4_timeout_elapsed(poll_start, DIAG_POLL_TIMEOUT_MS)) {
+            error = (unsigned int)-ETIMEDOUT;
+            msdc_reset_hw(host->id);
+            break;
+        }
+#endif
         if(!get_xfer_done){
             ints = sdr_read32(MSDC_INT);
             ints &= wints;
@@ -134,6 +148,13 @@ int msdc_pio_read(struct msdc_host *host, void *buf)
         left = 0x200;
         ptr = buf;
         while (left) {
+#ifdef LIBREECHO_READONLY_DIAGNOSTIC
+            if (gpt4_timeout_elapsed(poll_start, DIAG_POLL_TIMEOUT_MS)) {
+                error = (unsigned int)-ETIMEDOUT;
+                msdc_reset_hw(host->id);
+                break;
+            }
+#endif
             // printf("left = 0x%08X fifocnt 0x%08X\n", left, msdc_rxfifocnt());
             if ((left >=  MSDC_FIFO_THD) && (msdc_rxfifocnt() >= MSDC_FIFO_THD)) {
                 count = MSDC_FIFO_THD >> 2;
@@ -278,6 +299,9 @@ static unsigned int msdc_command_start(struct msdc_host   *host,
     u32 resp;  
     // unsigned long tmo;
     struct mmc_request *mrq = cmd->mrq;
+#ifdef LIBREECHO_READONLY_DIAGNOSTIC
+    uint32_t poll_start = gpt4_get_current_tick();
+#endif
 
     /* Protocol layer does not provide response type, but our hardware needs 
      * to know exact type, not just size!
@@ -381,6 +405,13 @@ static unsigned int msdc_command_start(struct msdc_host   *host,
         for (;;) {
             if (!sdc_is_cmd_busy())
                 break;
+#ifdef LIBREECHO_READONLY_DIAGNOSTIC
+            if (gpt4_timeout_elapsed(poll_start, DIAG_POLL_TIMEOUT_MS)) {
+                cmd->error = (unsigned int)-ETIMEDOUT;
+                msdc_reset_hw(host->id);
+                return cmd->error;
+            }
+#endif
 #if 0
             if (time_after(jiffies, tmo)) {
                 ERR_MSG("XXX cmd_busy timeout: before CMD<%d>", opcode);    
@@ -401,6 +432,13 @@ static unsigned int msdc_command_start(struct msdc_host   *host,
         for (;;) {   
             if (!sdc_is_busy())
                 break;
+#ifdef LIBREECHO_READONLY_DIAGNOSTIC
+            if (gpt4_timeout_elapsed(poll_start, DIAG_POLL_TIMEOUT_MS)) {
+                cmd->error = (unsigned int)-ETIMEDOUT;
+                msdc_reset_hw(host->id);
+                return cmd->error;
+            }
+#endif
 #if 0
             if (time_after(jiffies, tmo)) {
                 ERR_MSG("XXX sdc_busy timeout: before CMD<%d>", opcode);    
@@ -477,6 +515,9 @@ static unsigned int msdc_command_resp_polling(struct msdc_host   *host,
     u32 intsts;
 
     u32 cmdsts = MSDC_INT_CMDRDY  | MSDC_INT_RSPCRCERR  | MSDC_INT_CMDTMO;     
+#ifdef LIBREECHO_READONLY_DIAGNOSTIC
+    uint32_t poll_start = gpt4_get_current_tick();
+#endif
 
 #ifdef MTK_MSDC_USE_CMD23
     struct mmc_command *sbc =  NULL;
@@ -505,6 +546,14 @@ static unsigned int msdc_command_resp_polling(struct msdc_host   *host,
             sdr_write32(MSDC_INT, intsts);
             break;
         }
+#ifdef LIBREECHO_READONLY_DIAGNOSTIC
+        if (gpt4_timeout_elapsed(poll_start, DIAG_POLL_TIMEOUT_MS)) {
+            cmd->error = (unsigned int)-ETIMEDOUT;
+            msdc_reset_hw(host->id);
+            host->cmd = NULL;
+            return cmd->error;
+        }
+#endif
 #if 0        
         if (time_after(jiffies, tmo)) {
             ERR_MSG("XXX CMD<%d> polling_for_completion timeout ARG<0x%.8x>",

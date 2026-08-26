@@ -161,6 +161,14 @@ int main() {
             reg[8/4] = 0x1971;
             break;
         }
+        case 0x4000: {
+            /* Read a 32-bit memory-mapped register (no MPU enforced in BROM) */
+            uint32_t addr = recv_dword();
+            printf("Read reg 0x%08X\n", addr);
+            uint32_t val = *(volatile uint32_t *)addr;
+            send_dword(val);
+            break;
+        }
         default:
             printf("Invalid command\n");
             break;
